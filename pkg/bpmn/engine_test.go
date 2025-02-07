@@ -1,7 +1,9 @@
 package bpmn
 
 import (
+	"flag"
 	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -27,10 +29,11 @@ func Test_BpmnEngine_interfaces_implemented(t *testing.T) {
 	var _ BpmnEngine = &BpmnEngineState{}
 }
 
+// setup
 func TestRegisterHandlerByTaskIdGetsCalled(t *testing.T) {
-	// setup
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	bpmnEngine := New()
-	process, _ := bpmnEngine.LoadFromFile("../../test-cases/simple_task.bpmn")
+	process, _ := bpmnEngine.LoadFromFile("./test-cases/simple_task.bpmn")
 	wasCalled := false
 	handler := func(job ActivatedJob) {
 		wasCalled = true

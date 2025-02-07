@@ -228,7 +228,7 @@ func (state *BpmnEngineState) run(instance *processInstanceInfo) (err error) {
 	}
 	// TODO: persistently update state
 	state.persistence.PersistProcessInstance(instance)
-
+	state.persistence.GetPersistence().FlushTransaction(instance.InstanceKey)
 	return err
 }
 

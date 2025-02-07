@@ -507,7 +507,7 @@ func ParseFlags(name, desc string, build *BuildInfo) (*Config, error) {
 	}
 	showVersion := false
 
-	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 
 	fs.StringVar(&config.NodeID, "node-id", "1", "Unique ID for node. If not set, set to advertised Raft address")
 	fs.Var(&config.ExtensionPaths, "extensions-path", "Comma-delimited list of paths to directories, zipfiles, or tar.gz files containing SQLite extensions")

@@ -3,10 +3,10 @@ package rqlite
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
-	"time"
-
 	"log"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/bwmarrin/snowflake"
 	bpmnEngineExporter "github.com/pbinitiative/zenbpm/pkg/bpmn/exporter"
@@ -18,6 +18,10 @@ import (
 type BpmnEnginePersistenceRqlite struct {
 	snowflakeIdGenerator *snowflake.Node
 	ctx                  *RqliteContext
+	queryChan            chan Query
+	flushChan            chan int64
+	mutex                sync.Mutex
+	executeFunc          func([]string, *store.Store) // Function that executes write queries
 }
 
 func NewBpmnEnginePersistenceRqlite(snowflakeIdGenerator *snowflake.Node) *BpmnEnginePersistenceRqlite {
@@ -28,10 +32,18 @@ func NewBpmnEnginePersistenceRqlite(snowflakeIdGenerator *snowflake.Node) *BpmnE
 
 	Init(context.Str)
 
-	return &BpmnEnginePersistenceRqlite{
+	persitenceInst := &BpmnEnginePersistenceRqlite{
 		snowflakeIdGenerator: gen,
 		ctx:                  context,
+		// TODO: Make the buffers configurable
+		queryChan:   make(chan Query, 100),
+		flushChan:   make(chan int64, 10),
+		mutex:       sync.Mutex{},
+		executeFunc: defaultExecute,
 	}
+	go persitenceInst.queryProcessor()
+
+	return persitenceInst
 }
 
 func (persistence *BpmnEnginePersistenceRqlite) RqliteStop() {
@@ -363,6 +375,7 @@ func (persistence *BpmnEnginePersistenceRqlite) FindActivitiesByProcessInstanceK
 
 // WRITE
 
+// Deploying process needs no external flushing
 func (persistence *BpmnEnginePersistenceRqlite) PersistNewProcess(processDefinition *sql.ProcessDefinitionEntity) error {
 
 	sql := sql.BuildProcessDefinitionUpsertQuery(processDefinition)
@@ -383,12 +396,8 @@ func (persistence *BpmnEnginePersistenceRqlite) PersistProcessInstance(processIn
 	sql := sql.BuildProcessInstanceUpsertQuery(processInstance)
 
 	log.Printf("Creating process instance: %s", sql)
-	_, err := execute([]string{sql}, persistence.ctx.Str)
+	persistence.queryChan <- Query{Key: processInstance.Key, SQL: sql}
 
-	if err != nil {
-		log.Panicf("Error executing SQL statements")
-		return err
-	}
 	return nil
 
 }
@@ -397,12 +406,8 @@ func (persistence *BpmnEnginePersistenceRqlite) PersistNewMessageSubscription(su
 	sql := sql.BuildMessageSubscriptionUpsertQuery(subscription)
 
 	log.Printf("Creating message subscription: %s", sql)
-	_, err := execute([]string{sql}, persistence.ctx.Str)
+	persistence.queryChan <- Query{Key: subscription.ProcessInstanceKey, SQL: sql}
 
-	if err != nil {
-		log.Panicf("Error executing SQL statements")
-		return err
-	}
 	return nil
 }
 
@@ -410,12 +415,8 @@ func (persistence *BpmnEnginePersistenceRqlite) PersistNewTimer(timer *sql.Timer
 	sql := sql.BuildTimerUpsertQuery(timer)
 
 	log.Printf("Creating timer: %s", sql)
-	_, err := execute([]string{sql}, persistence.ctx.Str)
+	persistence.queryChan <- Query{Key: timer.ProcessInstanceKey, SQL: sql}
 
-	if err != nil {
-		log.Panicf("Error executing SQL statements")
-		return err
-	}
 	return nil
 }
 
@@ -423,12 +424,8 @@ func (persistence *BpmnEnginePersistenceRqlite) PersistJob(job *sql.JobEntity) e
 	sql := sql.BuildJobUpsertQuery(job)
 
 	log.Printf("Creating job: %s", sql)
-	_, err := execute([]string{sql}, persistence.ctx.Str)
+	persistence.queryChan <- Query{Key: job.ProcessInstanceKey, SQL: sql}
 
-	if err != nil {
-		log.Panicf("Error executing SQL statements")
-		return err
-	}
 	return nil
 }
 
@@ -436,12 +433,8 @@ func (persistence *BpmnEnginePersistenceRqlite) PersistActivity(event *bpmnEngin
 	sql := sql.BuildActivityInstanceUpsertQuery(persistence.snowflakeIdGenerator.Generate().Int64(), event.ProcessInstanceKey, event.ProcessKey, time.Now().Unix(), elementInfo.Intent, elementInfo.ElementId, elementInfo.BpmnElementType)
 
 	log.Printf("Creating activity log: %s", sql)
-	_, err := execute([]string{sql}, persistence.ctx.Str)
+	persistence.queryChan <- Query{Key: event.ProcessInstanceKey, SQL: sql}
 
-	if err != nil {
-		log.Panicf("Error executing SQL statements")
-		return err
-	}
 	return nil
 }
 
@@ -513,6 +506,8 @@ func execute(statements []string, str *store.Store) ([]*proto.ExecuteQueryRespon
 		},
 		Timings: false,
 	}
+
+	log.Printf("Executing: %v", er)
 
 	results, resultsErr := str.Execute(er)
 

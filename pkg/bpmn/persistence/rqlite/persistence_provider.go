@@ -22,4 +22,6 @@ type BpmnEnginePersistence interface {
 	PersistNewTimer(timer *sql.TimerEntity) error
 	PersistJob(job *sql.JobEntity) error
 	PersistActivity(event *bpmnEngineExporter.ProcessInstanceEvent, elementInfo *bpmnEngineExporter.ElementInfo) error
+
+	FlushTransaction(key int64) error
 }

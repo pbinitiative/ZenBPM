@@ -81,6 +81,7 @@ func (state *BpmnEngineState) JobCompleteById(jobId int64) {
 	}
 	jobs[0].JobState = Completing
 	state.persistence.PersistJob(jobs[0])
+	state.persistence.GetPersistence().FlushTransaction(jobs[0].ProcessInstanceKey)
 
 	state.RunOrContinueInstance(jobs[0].ProcessInstanceKey)
 
